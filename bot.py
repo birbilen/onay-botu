@@ -1,10 +1,6 @@
 import os
 import logging
-import base64
-import asyncio
-from io import BytesIO
 
-import httpx
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -14,7 +10,6 @@ from telegram.ext import (
     ChatJoinRequestHandler,
     ContextTypes,
     filters,
-    ConversationHandler,
 )
 
 logging.basicConfig(
@@ -27,92 +22,11 @@ BOT_TOKEN = os.environ["BOT_TOKEN"]
 ADMIN_ID = int(os.environ["ADMIN_ID"])
 TARGET_GROUP_ID = int(os.environ["TARGET_GROUP_ID"])
 ARCHIVE_CHANNEL_ID = int(os.environ["ARCHIVE_CHANNEL_ID"])
-GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
-
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
-GEMINI_URL = (
-    f"https://generativelanguage.googleapis.com/v1beta/models/"
-    f"{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
-)
-
-# Conversation states
-WAITING_ID = 1
-WAITING_DIPLOMA = 2
 
 # Geçici veri: {user_id: {"id_file_id": ..., "diploma_file_id": ...}}
 pending_data: dict = {}
 
 
-async def download_photo_as_base64(bot, file_id: str) -> str:
-    file = await bot.get_file(file_id)
-    buf = BytesIO()
-    await file.download_to_memory(buf)
-    buf.seek(0)
-    return base64.b64encode(buf.read()).decode("utf-8")
-
-
-async def analyze_with_gemini(id_b64: str, diploma_b64: str) -> dict:
-    prompt = """Sana iki fotoğraf gönderiyorum:
-1. Birinci fotoğraf: Türkiye Cumhuriyeti kimlik kartı
-2. İkinci fotoğraf: Üniversite diploması
-
-Lütfen şunları kontrol et:
-- Kimlik kartındaki AD SOYAD
-- Diplomadaki AD SOYAD
-- Diplomadaki BÖLÜM ADI (matematik bölümü mü?)
-- Kimlik ve diplomadaki adların birbiriyle UYUŞUP UYUŞMADIĞI
-
-Cevabını SADECE şu JSON formatında ver, başka hiçbir şey yazma:
-{
-  "kimlik_ad_soyad": "...",
-  "diploma_ad_soyad": "...",
-  "diploma_bolum": "...",
-  "matematik_bolumu": true/false,
-  "ad_uyusumu": true/false,
-  "notlar": "varsa ek notlar, yoksa boş bırak"
-}"""
-
-    payload = {
-        "contents": [
-            {
-                "parts": [
-                    {"text": prompt},
-                    {
-                        "inline_data": {
-                            "mime_type": "image/jpeg",
-                            "data": id_b64,
-                        }
-                    },
-                    {
-                        "inline_data": {
-                            "mime_type": "image/jpeg",
-                            "data": diploma_b64,
-                        }
-                    },
-                ]
-            }
-        ]
-    }
-
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.post(GEMINI_URL, json=payload)
-        resp.raise_for_status()
-        data = resp.json()
-
-    raw_text = data["candidates"][0]["content"]["parts"][0]["text"]
-    # JSON bloğunu temizle
-    raw_text = raw_text.strip()
-    if raw_text.startswith("```"):
-        raw_text = raw_text.split("```")[1]
-        if raw_text.startswith("json"):
-            raw_text = raw_text[4:]
-    raw_text = raw_text.strip()
-
-    import json
-    return json.loads(raw_text)
-
-
-# --- Join Request Handler ---
 async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.chat_join_request.from_user
     user_id = user.id
@@ -136,9 +50,6 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
     except Exception as e:
         logger.warning(f"Kullanıcıya DM gönderilemedi: {user_id} - {e}")
-        return
-
-    context.user_data["awaiting"] = WAITING_ID
 
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -148,12 +59,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id not in pending_data:
         return
 
-    photo = update.message.photo[-1]  # En yüksek çözünürlük
+    photo = update.message.photo[-1]
     file_id = photo.file_id
     state = pending_data[user_id]
 
     if "id_file_id" not in state:
-        # Kimlik fotoğrafı alındı
         state["id_file_id"] = file_id
         await update.message.reply_text(
             "✅ Kimlik fotoğrafı alındı.\n\nŞimdi *diploma fotoğrafınızı* gönderin:",
@@ -161,17 +71,14 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     elif "diploma_file_id" not in state:
-        # Diploma fotoğrafı alındı
         state["diploma_file_id"] = file_id
         await update.message.reply_text(
-            "✅ Diploma fotoğrafı alındı. Bilgileriniz inceleniyor, lütfen bekleyin... 🔍"
+            "✅ Diploma fotoğrafı alındı. Başvurunuz incelemeye alındı, en kısa sürede bilgilendirileceksiniz. 🔍"
         )
-
-        # Analiz başlat
-        await process_application(update, context, user)
+        await process_application(context, user)
 
 
-async def process_application(update, context, user):
+async def process_application(context, user):
     user_id = user.id
     state = pending_data.get(user_id, {})
 
@@ -182,66 +89,31 @@ async def process_application(update, context, user):
         return
 
     try:
-        # Fotoğrafları indir
-        id_b64 = await download_photo_as_base64(context.bot, id_file_id)
-        diploma_b64 = await download_photo_as_base64(context.bot, diploma_file_id)
-
-        # Gemini ile analiz et
-        result = await analyze_with_gemini(id_b64, diploma_b64)
-
         # Arşiv kanalına gönder
-        caption = (
-            f"📋 YENİ BAŞVURU\n"
-            f"👤 Kullanıcı: {user.full_name} (@{user.username or 'yok'}) [ID: {user_id}]\n"
-            f"─────────────────\n"
-            f"🪪 Kimlik Adı: {result.get('kimlik_ad_soyad', '?')}\n"
-            f"🎓 Diploma Adı: {result.get('diploma_ad_soyad', '?')}\n"
-            f"📚 Bölüm: {result.get('diploma_bolum', '?')}\n"
-            f"─────────────────\n"
-            f"{'✅' if result.get('matematik_bolumu') else '❌'} Matematik Bölümü\n"
-            f"{'✅' if result.get('ad_uyusumu') else '❌'} Ad Uyuşumu\n"
-        )
-        if result.get("notlar"):
-            caption += f"📝 Not: {result['notlar']}\n"
-
-        # Kimlik fotoğrafı arşive
         await context.bot.send_photo(
             chat_id=ARCHIVE_CHANNEL_ID,
             photo=id_file_id,
-            caption=f"🪪 KİMLİK — {user.full_name} [ID: {user_id}]",
+            caption=f"🪪 KİMLİK — {user.full_name} (@{user.username or 'yok'}) [ID: {user_id}]",
         )
-        # Diploma fotoğrafı arşive
         await context.bot.send_photo(
             chat_id=ARCHIVE_CHANNEL_ID,
             photo=diploma_file_id,
-            caption=caption,
+            caption=f"🎓 DİPLOMA — {user.full_name} (@{user.username or 'yok'}) [ID: {user_id}]",
         )
 
-        # Admin'e bildirim + butonlar
-        matematik_ok = result.get("matematik_bolumu", False)
-        ad_ok = result.get("ad_uyusumu", False)
-
-        if matematik_ok and ad_ok:
-            oneri = "✅ Otomatik öneri: ONAYLA"
-        else:
-            sorunlar = []
-            if not matematik_ok:
-                sorunlar.append("matematik bölümü değil")
-            if not ad_ok:
-                sorunlar.append("ad uyuşmuyor")
-            oneri = f"⚠️ Sorun: {', '.join(sorunlar)}"
-
-        admin_text = (
-            f"📨 YENİ ÜYELİK BAŞVURUSU\n\n"
-            f"👤 {user.full_name} (@{user.username or 'yok'})\n"
-            f"🪪 Kimlik: {result.get('kimlik_ad_soyad', '?')}\n"
-            f"🎓 Diploma: {result.get('diploma_ad_soyad', '?')}\n"
-            f"📚 Bölüm: {result.get('diploma_bolum', '?')}\n\n"
-            f"{'✅' if matematik_ok else '❌'} Matematik bölümü\n"
-            f"{'✅' if ad_ok else '❌'} Ad uyuşumu\n\n"
-            f"{oneri}"
+        # Admin'e fotoğrafları gönder
+        await context.bot.send_photo(
+            chat_id=ADMIN_ID,
+            photo=id_file_id,
+            caption=f"🪪 KİMLİK\n👤 {user.full_name} (@{user.username or 'yok'})",
+        )
+        await context.bot.send_photo(
+            chat_id=ADMIN_ID,
+            photo=diploma_file_id,
+            caption=f"🎓 DİPLOMA\n👤 {user.full_name} (@{user.username or 'yok'})",
         )
 
+        # Onay/red butonları
         keyboard = InlineKeyboardMarkup([
             [
                 InlineKeyboardButton("✅ Onayla", callback_data=f"approve_{user_id}"),
@@ -251,32 +123,21 @@ async def process_application(update, context, user):
 
         await context.bot.send_message(
             chat_id=ADMIN_ID,
-            text=admin_text,
+            text=(
+                f"📨 YENİ ÜYELİK BAŞVURUSU\n\n"
+                f"👤 {user.full_name}\n"
+                f"🔗 @{user.username or 'yok'}\n"
+                f"🆔 {user_id}\n\n"
+                f"Belgeleri inceleyip karar verin:"
+            ),
             reply_markup=keyboard,
         )
 
     except Exception as e:
-        logger.error(f"Analiz hatası: {e}")
-
-        # State'i sıfırla, kullanıcıdan tekrar iste
-        pending_data[user_id] = {}
-        await context.bot.send_message(
-            chat_id=user_id,
-            text=(
-                "⚠️ Belgeleriniz işlenirken teknik bir sorun oluştu, özür dileriz.\n\n"
-                "Lütfen tekrar deneyin. Önce *kimlik kartı fotoğrafınızı* gönderin:"
-            ),
-            parse_mode="Markdown",
-        )
-
-        # Admin'e sadece bilgi ver
+        logger.error(f"Hata: {e}")
         await context.bot.send_message(
             chat_id=ADMIN_ID,
-            text=(
-                f"⚠️ Analiz hatası — kullanıcıdan tekrar istendi.\n"
-                f"Kullanıcı: {user.full_name} [ID: {user_id}]\n"
-                f"Hata: {e}"
-            ),
+            text=f"⚠️ Hata oluştu!\nKullanıcı: {user.full_name} [ID: {user_id}]\nHata: {e}",
         )
 
 
@@ -296,9 +157,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.approve_chat_join_request(
             chat_id=TARGET_GROUP_ID, user_id=user_id
         )
-        await query.edit_message_text(
-            query.message.text + "\n\n✅ ONAYLANDI"
-        )
+        await query.edit_message_text(query.message.text + "\n\n✅ ONAYLANDI")
         await context.bot.send_message(
             chat_id=user_id,
             text="🎉 Başvurunuz onaylandı! Gruba hoş geldiniz.",
@@ -307,9 +166,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.decline_chat_join_request(
             chat_id=TARGET_GROUP_ID, user_id=user_id
         )
-        await query.edit_message_text(
-            query.message.text + "\n\n❌ REDDEDİLDİ"
-        )
+        await query.edit_message_text(query.message.text + "\n\n❌ REDDEDİLDİ")
         await context.bot.send_message(
             chat_id=user_id,
             text=(
@@ -318,7 +175,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ),
         )
 
-    # Temizle
     pending_data.pop(user_id, None)
 
 
