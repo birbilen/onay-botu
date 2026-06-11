@@ -128,7 +128,7 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
                 "1️⃣ TC Kimlik kartınızın fotoğrafını\n"
                 "2️⃣ Üniversite diplomasının fotoğrafını\n\n"
                 "gönderin.\n\n"
-                "📌 Bilgileriniz yalnızca kimlik doğrulama amacıyla kullanılacaktır.\n\n"
+                "📌 Bilgileriniz yalnızca kimlik doğrulama amacıyla kullanılacaktır. Bu yüzden sadece kimlikteki ad soayad ve diplomadaki ad soyad ile bölüm dışındaki yerleri karalayınız.\n\n"
                 "Lütfen önce *kimlik kartı fotoğrafınızı* gönderin:"
             ),
             parse_mode="Markdown",
