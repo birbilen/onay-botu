@@ -29,9 +29,10 @@ TARGET_GROUP_ID = int(os.environ["TARGET_GROUP_ID"])
 ARCHIVE_CHANNEL_ID = int(os.environ["ARCHIVE_CHANNEL_ID"])
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
 GEMINI_URL = (
     f"https://generativelanguage.googleapis.com/v1beta/models/"
-    f"gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    f"{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
 )
 
 # Conversation states
