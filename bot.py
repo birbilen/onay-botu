@@ -257,25 +257,26 @@ async def process_application(update, context, user):
 
     except Exception as e:
         logger.error(f"Analiz hatası: {e}")
+
+        # State'i sıfırla, kullanıcıdan tekrar iste
+        pending_data[user_id] = {}
+        await context.bot.send_message(
+            chat_id=user_id,
+            text=(
+                "⚠️ Belgeleriniz işlenirken teknik bir sorun oluştu, özür dileriz.\n\n"
+                "Lütfen tekrar deneyin. Önce *kimlik kartı fotoğrafınızı* gönderin:"
+            ),
+            parse_mode="Markdown",
+        )
+
+        # Admin'e sadece bilgi ver
         await context.bot.send_message(
             chat_id=ADMIN_ID,
             text=(
-                f"⚠️ Analiz hatası!\n"
+                f"⚠️ Analiz hatası — kullanıcıdan tekrar istendi.\n"
                 f"Kullanıcı: {user.full_name} [ID: {user_id}]\n"
-                f"Hata: {e}\n\n"
-                f"Manuel inceleme gerekiyor."
+                f"Hata: {e}"
             ),
-        )
-        keyboard = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("✅ Onayla", callback_data=f"approve_{user_id}"),
-                InlineKeyboardButton("❌ Reddet", callback_data=f"decline_{user_id}"),
-            ]
-        ])
-        await context.bot.send_message(
-            chat_id=ADMIN_ID,
-            text=f"Yine de karar ver:",
-            reply_markup=keyboard,
         )
 
 
