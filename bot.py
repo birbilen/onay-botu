@@ -29,8 +29,13 @@ REMINDER_TEXT = (
     "⏰ *Hatırlatma:* Kimlik kartı ve diploma fotoğraflarınızı henüz göndermediniz.\n\n"
     "Yalnızca belgelerinizdeki *ad soyad* ve *bölüm* bilgisi kontrol edilmektedir.\n\n"
     "⚠️ İlgili belgeleri göndermediğiniz takdirde gruba gönderdiğiniz katılım isteği reddedilecektir.\n\n"
+    "Lütfen önce *kimlik kartı fotoğrafınızı* gönderin:"
+)
+
+DECLINE_TEXT = (
+    "❌ Katılım isteğiniz reddedildi.\n\n"
     "Bot mesajını geç gördüyseniz veya tekrar istek göndermek istiyorsanız grup linkimiz aşağıda:\n"
-    f"{GROUP_LINK}"
+    f"https://t.me/+imWCy38bbsdjOTI0"
 )
 
 # Hatırlatma süreleri (saniye)
@@ -92,7 +97,7 @@ async def send_reminder(context: ContextTypes.DEFAULT_TYPE):
                 text=(
                     REMINDER_TEXT + "\n\n"
                     "🔴 Bu son hatırlatmadır. *2 saat içinde* belgelerinizi göndermezseniz "
-                    "katılım isteğiniz otomatik olarak reddedilecektir."
+                    "katılım isteğiniz otomatik olarak reddedilecektir !!"
                 ),
                 parse_mode="Markdown",
             )
@@ -124,7 +129,7 @@ async def auto_decline(context: ContextTypes.DEFAULT_TYPE):
         )
         await context.bot.send_message(
             chat_id=user_id,
-            text="❌ Belgeler gönderilmediği için katılım isteğiniz reddedilmiştir.",
+            text=DECLINE_TEXT,
         )
         full_name = state.get("full_name", "Bilinmiyor")
         username = state.get("username", "yok")
