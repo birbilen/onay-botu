@@ -57,6 +57,7 @@ async def send_reminder(context: ContextTypes.DEFAULT_TYPE):
     reminder_num = job.data["reminder_num"]  # 1, 2, 3
 
     state = pending_data.get(user_id)
+    logger.info(f"send_reminder cagrildi: user_id={user_id}, reminder_num={reminder_num}, state mevcut={state is not None}")
 
     # Kullanıcı zaten belgelerini gönderdiyse iptal et
     if not state or ("id_file_id" in state and "diploma_file_id" in state):
@@ -176,6 +177,7 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
 
         # İlk hatırlatmayı planla (15 dakika sonra)
+        logger.info(f"Job planlanıyor: user_id={user_id}, delay={REMINDER_DELAYS[0]}s")
         context.job_queue.run_once(
             send_reminder,
             when=REMINDER_DELAYS[0],
