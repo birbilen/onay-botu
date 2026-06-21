@@ -28,8 +28,7 @@ GROUP_LINK = "https://t.me/+imWCy38bbsdjOTI0"
 REMINDER_TEXT = (
     "⏰ *Hatırlatma:* Kimlik kartı ve diploma fotoğraflarınızı henüz göndermediniz.\n\n"
     "Yalnızca belgelerinizdeki *ad soyad* ve *bölüm* bilgisi kontrol edilmektedir.\n\n"
-    "⚠️ İlgili belgeleri göndermediğiniz takdirde gruba gönderdiğiniz katılım isteği reddedilecektir.\n\n"
-    "Lütfen önce *kimlik kartı fotoğrafınızı* gönderin:"
+    "⚠️ İlgili belgeleri göndermediğiniz takdirde gruba gönderdiğiniz katılım isteği reddedilecektir."
 )
 
 DECLINE_TEXT = (
@@ -70,6 +69,7 @@ async def send_reminder(context: ContextTypes.DEFAULT_TYPE):
 
     if reminder_num <= 2:
         # Hatırlatma gönder
+        forbidden = False
         try:
             await context.bot.send_message(
                 chat_id=user_id,
@@ -78,6 +78,21 @@ async def send_reminder(context: ContextTypes.DEFAULT_TYPE):
             )
         except Exception as e:
             logger.warning(f"Hatırlatma gönderilemedi {user_id}: {e}")
+            forbidden = "Forbidden" in str(e)
+            full_name = state.get("full_name", "Bilinmiyor")
+            username = state.get("username", "yok")
+            await context.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    f"⚠️ Hatırlatma mesajı gönderilemedi (kullanıcı botu engellemiş/sohbeti kapatmış olabilir)\n"
+                    f"👤 {full_name} (@{username}) [ID: {user_id}]\n"
+                    f"Hata: {e}"
+                ),
+            )
+
+        if forbidden:
+            # Kullanıcıya mesaj atılamıyor, daha fazla hatırlatma planlamanın anlamı yok
+            return
 
         # Sonraki hatırlatmayı planla
         next_reminder = reminder_num + 1
@@ -97,7 +112,7 @@ async def send_reminder(context: ContextTypes.DEFAULT_TYPE):
                 text=(
                     REMINDER_TEXT + "\n\n"
                     "🔴 Bu son hatırlatmadır. *2 saat içinde* belgelerinizi göndermezseniz "
-                    "katılım isteğiniz otomatik olarak reddedilecektir !!"
+                    "katılım isteğiniz otomatik olarak reddedilecektir."
                 ),
                 parse_mode="Markdown",
             )
@@ -175,7 +190,7 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
                 "1️⃣ TC Kimlik kartınızın fotoğrafını\n"
                 "2️⃣ Üniversite diplomasının fotoğrafını\n\n"
                 "gönderin.\n\n"
-                "📌 Yalnızca belgelerinizdeki *ad soyad* ve *bölüm* bilgisi kontrol edilmektedir. Diğer bilgileri karalayınız !! \n\n"
+                "📌 Yalnızca belgelerinizdeki *ad soyad* ve *bölüm* bilgisi kontrol edilmektedir. Diğer bilgileri karalayınız !!\n\n"
                 "Lütfen önce *kimlik kartı fotoğrafınızı* gönderin:"
             ),
             parse_mode="Markdown",
