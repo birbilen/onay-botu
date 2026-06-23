@@ -27,7 +27,7 @@ GROUP_LINK = "https://t.me/+imWCy38bbsdjOTI0"
 
 REMINDER_TEXT = (
     "⏰ *Hatırlatma:* Kimlik kartı ve diploma fotoğraflarınızı henüz göndermediniz.\n\n"
-    "Yalnızca belgelerinizdeki *ad soyad* ve *bölüm* bilgisi kontrol edilmektedir.\n\n"
+    "📌 Yalnızca belgelerinizdeki *ad soyad* ve *bölüm* bilgisi kontrol edilmektedir. Diğer bilgileri karalayınız !! \n\n"
     "⚠️ İlgili belgeleri göndermediğiniz takdirde gruba gönderdiğiniz katılım isteği reddedilecektir."
 )
 
@@ -39,11 +39,11 @@ DECLINE_TEXT = (
 
 # Hatırlatma süreleri (saniye)
 REMINDER_DELAYS = [
-    15 * 60,       # 1. hatırlatma: 15 dakika
-    60 * 60,       # 2. hatırlatma: 1 saat
-    6 * 60 * 60,   # 3. hatırlatma: 6 saat
+    5 * 60,        # 1. hatırlatma: 5 dakika
+    15 * 60,       # 2. hatırlatma: 15 dakika
+    60 * 60,       # 3. hatırlatma: 1 saat
 ]
-AUTO_DECLINE_DELAY = 2 * 60 * 60  # 3. hatırlatmadan 2 saat sonra otomatik red
+AUTO_DECLINE_DELAY = 3 * 60 * 60  # 3. hatırlatmadan 3 saat sonra otomatik red
 
 # pending_data[user_id] = {
 #   "id_file_id": str,
@@ -81,14 +81,32 @@ async def send_reminder(context: ContextTypes.DEFAULT_TYPE):
             forbidden = "Forbidden" in str(e)
             full_name = state.get("full_name", "Bilinmiyor")
             username = state.get("username", "yok")
-            await context.bot.send_message(
-                chat_id=ADMIN_ID,
-                text=(
-                    f"⚠️ Hatırlatma mesajı gönderilemedi (kullanıcı botu engellemiş/sohbeti kapatmış olabilir)\n"
-                    f"👤 {full_name} (@{username}) [ID: {user_id}]\n"
-                    f"Hata: {e}"
-                ),
-            )
+
+            if forbidden:
+                keyboard = InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton("❌ İsteği Reddet", callback_data=f"decline_{user_id}"),
+                    ]
+                ])
+                await context.bot.send_message(
+                    chat_id=ADMIN_ID,
+                    text=(
+                        f"🚫 Kullanıcıya ulaşılamıyor (botu engellemiş/sohbeti silmiş olabilir)\n"
+                        f"👤 {full_name} (@{username}) [ID: {user_id}]\n\n"
+                        f"Belge gönderme şansı tanınamıyor. İsterseniz isteği reddedebilirsiniz, "
+                        f"ya da kullanıcı kendisi tekrar başvuruda bulunabilir."
+                    ),
+                    reply_markup=keyboard,
+                )
+            else:
+                await context.bot.send_message(
+                    chat_id=ADMIN_ID,
+                    text=(
+                        f"⚠️ Hatırlatma mesajı gönderilemedi\n"
+                        f"👤 {full_name} (@{username}) [ID: {user_id}]\n"
+                        f"Hata: {e}"
+                    ),
+                )
 
         if forbidden:
             # Kullanıcıya mesaj atılamıyor, daha fazla hatırlatma planlamanın anlamı yok
@@ -105,21 +123,39 @@ async def send_reminder(context: ContextTypes.DEFAULT_TYPE):
         )
 
     elif reminder_num == 3:
-        # Son hatırlatma — 2 saat sonra reddedileceğini bildir
+        # Son hatırlatma — 3 saat sonra reddedileceğini bildir
         try:
             await context.bot.send_message(
                 chat_id=user_id,
                 text=(
                     REMINDER_TEXT + "\n\n"
-                    "🔴 Bu son hatırlatmadır. *2 saat içinde* belgelerinizi göndermezseniz "
+                    "🔴 Bu son hatırlatmadır. *3 saat içinde* belgelerinizi göndermezseniz "
                     "katılım isteğiniz otomatik olarak reddedilecektir."
                 ),
                 parse_mode="Markdown",
             )
         except Exception as e:
             logger.warning(f"Son hatırlatma gönderilemedi {user_id}: {e}")
+            if "Forbidden" in str(e):
+                full_name = state.get("full_name", "Bilinmiyor")
+                username = state.get("username", "yok")
+                keyboard = InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton("❌ İsteği Reddet", callback_data=f"decline_{user_id}"),
+                    ]
+                ])
+                await context.bot.send_message(
+                    chat_id=ADMIN_ID,
+                    text=(
+                        f"🚫 Kullanıcıya ulaşılamıyor (botu engellemiş/sohbeti silmiş olabilir)\n"
+                        f"👤 {full_name} (@{username}) [ID: {user_id}]\n\n"
+                        f"Belge gönderme şansı tanınamıyor. İsterseniz isteği reddedebilirsiniz, "
+                        f"ya da kullanıcı kendisi tekrar başvuruda bulunabilir."
+                    ),
+                    reply_markup=keyboard,
+                )
 
-        # 2 saat sonra otomatik red
+        # 3 saat sonra otomatik red
         context.job_queue.run_once(
             auto_decline,
             when=AUTO_DECLINE_DELAY,
