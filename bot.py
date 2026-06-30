@@ -27,14 +27,16 @@ GROUP_LINK = "https://t.me/+imWCy38bbsdjOTI0"
 
 REMINDER_TEXT = (
     "⏰ *Hatırlatma:* Kimlik kartı ve diploma fotoğraflarınızı henüz göndermediniz.\n\n"
-    "📌 Yalnızca belgelerinizdeki *ad soyad* ve *bölüm* bilgisi kontrol edilmektedir. Diğer bilgileri karalayınız !! \n\n"
-    "⚠️ İlgili belgeleri göndermediğiniz takdirde gruba gönderdiğiniz katılım isteği reddedilecektir."
+    "Yalnızca belgelerinizdeki *ad soyad* ve *bölüm* bilgisi kontrol edilmektedir.\n\n"
+    "⚠️ İlgili belgeleri göndermediğiniz takdirde gruba gönderdiğiniz katılım isteği reddedilecektir.\n\n"
+    "Gruba katılmak için aşağıdaki linkten tekrar katılım isteği gönderebilirsiniz:\n"
+    f"{GROUP_LINK}"
 )
 
 DECLINE_TEXT = (
     "❌ Katılım isteğiniz reddedildi.\n\n"
     "Bot mesajını geç gördüyseniz veya tekrar istek göndermek istiyorsanız grup linkimiz aşağıda:\n"
-    f"https://t.me/+imWCy38bbsdjOTI0"
+    f"{GROUP_LINK}"
 )
 
 # Hatırlatma süreleri (saniye)
@@ -48,11 +50,50 @@ AUTO_DECLINE_DELAY = 3 * 60 * 60  # 3. hatırlatmadan 3 saat sonra otomatik red
 # pending_data[user_id] = {
 #   "id_file_id": str,
 #   "diploma_file_id": str,
-#   "reminder_count": int,
 #   "full_name": str,
 #   "username": str,
 # }
 pending_data: dict = {}
+
+
+def classify_forbidden(error_text: str):
+    """Forbidden hatasının türünü ayırt eder."""
+    if "bot was blocked by the user" in error_text:
+        return "blocked"
+    if "can't initiate conversation" in error_text:
+        return "no_response"
+    if "Forbidden" in error_text:
+        return "other"
+    return None
+
+
+async def notify_unreachable(context, user_id, full_name, username, error_text):
+    forbidden_type = classify_forbidden(error_text)
+
+    if forbidden_type == "blocked":
+        sebep = "🚫 Kullanıcı BOTU ENGELLEMİŞ."
+    elif forbidden_type == "no_response":
+        sebep = (
+            "ℹ️ Kullanıcı botu engellemedi, ama hiç yanıt vermediği için "
+            "Telegram bot tarafına tekrar mesaj gönderme izni vermiyor."
+        )
+    else:
+        sebep = f"⚠️ Bilinmeyen hata: {error_text}"
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("❌ İsteği Reddet", callback_data=f"decline_{user_id}")]
+    ])
+    await context.bot.send_message(
+        chat_id=ADMIN_ID,
+        text=(
+            f"🔕 Kullanıcıya ulaşılamıyor\n"
+            f"👤 {full_name} (@{username}) [ID: {user_id}]\n\n"
+            f"{sebep}\n\n"
+            f"Belge gönderme şansı tanınamıyor. İsterseniz isteği reddedebilirsiniz, "
+            f"ya da kullanıcı kendisi tekrar başvuruda bulunabilir."
+        ),
+        reply_markup=keyboard,
+    )
 
 
 async def send_reminder(context: ContextTypes.DEFAULT_TYPE):
@@ -83,21 +124,7 @@ async def send_reminder(context: ContextTypes.DEFAULT_TYPE):
             username = state.get("username", "yok")
 
             if forbidden:
-                keyboard = InlineKeyboardMarkup([
-                    [
-                        InlineKeyboardButton("❌ İsteği Reddet", callback_data=f"decline_{user_id}"),
-                    ]
-                ])
-                await context.bot.send_message(
-                    chat_id=ADMIN_ID,
-                    text=(
-                        f"🚫 Kullanıcıya ulaşılamıyor (botu engellemiş/sohbeti silmiş olabilir)\n"
-                        f"👤 {full_name} (@{username}) [ID: {user_id}]\n\n"
-                        f"Belge gönderme şansı tanınamıyor. İsterseniz isteği reddedebilirsiniz, "
-                        f"ya da kullanıcı kendisi tekrar başvuruda bulunabilir."
-                    ),
-                    reply_markup=keyboard,
-                )
+                await notify_unreachable(context, user_id, full_name, username, str(e))
             else:
                 await context.bot.send_message(
                     chat_id=ADMIN_ID,
@@ -139,21 +166,7 @@ async def send_reminder(context: ContextTypes.DEFAULT_TYPE):
             if "Forbidden" in str(e):
                 full_name = state.get("full_name", "Bilinmiyor")
                 username = state.get("username", "yok")
-                keyboard = InlineKeyboardMarkup([
-                    [
-                        InlineKeyboardButton("❌ İsteği Reddet", callback_data=f"decline_{user_id}"),
-                    ]
-                ])
-                await context.bot.send_message(
-                    chat_id=ADMIN_ID,
-                    text=(
-                        f"🚫 Kullanıcıya ulaşılamıyor (botu engellemiş/sohbeti silmiş olabilir)\n"
-                        f"👤 {full_name} (@{username}) [ID: {user_id}]\n\n"
-                        f"Belge gönderme şansı tanınamıyor. İsterseniz isteği reddedebilirsiniz, "
-                        f"ya da kullanıcı kendisi tekrar başvuruda bulunabilir."
-                    ),
-                    reply_markup=keyboard,
-                )
+                await notify_unreachable(context, user_id, full_name, username, str(e))
 
         # 3 saat sonra otomatik red
         context.job_queue.run_once(
@@ -178,10 +191,14 @@ async def auto_decline(context: ContextTypes.DEFAULT_TYPE):
         await context.bot.decline_chat_join_request(
             chat_id=TARGET_GROUP_ID, user_id=user_id
         )
-        await context.bot.send_message(
-            chat_id=user_id,
-            text=DECLINE_TEXT,
-        )
+        try:
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=DECLINE_TEXT,
+            )
+        except Exception:
+            pass  # Kullanıcıya ulaşılamıyorsa sorun değil, sadece red işlemini yap
+
         full_name = state.get("full_name", "Bilinmiyor")
         username = state.get("username", "yok")
         await context.bot.send_message(
@@ -226,13 +243,13 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
                 "1️⃣ TC Kimlik kartınızın fotoğrafını\n"
                 "2️⃣ Üniversite diplomasının fotoğrafını\n\n"
                 "gönderin.\n\n"
-                "📌 Yalnızca belgelerinizdeki *ad soyad* ve *bölüm* bilgisi kontrol edilmektedir. Diğer bilgileri karalayınız !!\n\n"
+                "📌 Yalnızca belgelerinizdeki *ad soyad* ve *bölüm* bilgisi kontrol edilmektedir. Diğer bilgileri karalayınız!!\n\n"
                 "Lütfen önce *kimlik kartı fotoğrafınızı* gönderin:"
             ),
             parse_mode="Markdown",
         )
 
-        # İlk hatırlatmayı planla (15 dakika sonra)
+        # İlk hatırlatmayı planla
         logger.info(f"Job planlanıyor: user_id={user_id}, delay={REMINDER_DELAYS[0]}s")
         context.job_queue.run_once(
             send_reminder,
@@ -355,22 +372,25 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             chat_id=TARGET_GROUP_ID, user_id=user_id
         )
         await query.edit_message_text(query.message.text + "\n\n✅ ONAYLANDI")
-        await context.bot.send_message(
-            chat_id=user_id,
-            text="🎉 Başvurunuz onaylandı! Gruba hoş geldiniz.",
-        )
+        try:
+            await context.bot.send_message(
+                chat_id=user_id,
+                text="🎉 Başvurunuz onaylandı! Gruba hoş geldiniz.",
+            )
+        except Exception:
+            pass
     elif action == "decline":
         await context.bot.decline_chat_join_request(
             chat_id=TARGET_GROUP_ID, user_id=user_id
         )
         await query.edit_message_text(query.message.text + "\n\n❌ REDDEDİLDİ")
-        await context.bot.send_message(
-            chat_id=user_id,
-            text=(
-                "Üzgünüz, başvurunuz onaylanamadı.\n"
-                "Sorun olduğunu düşünüyorsanız grup yöneticisiyle iletişime geçebilirsiniz."
-            ),
-        )
+        try:
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=DECLINE_TEXT,
+            )
+        except Exception:
+            pass
 
     cancel_reminders(context.job_queue, user_id)
     pending_data.pop(user_id, None)
